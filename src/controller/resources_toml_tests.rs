@@ -94,6 +94,7 @@ mod tests {
             captive_core_structured_config: Some(captive_config),
             enable_preflight: false,
             max_events_per_request: 1000,
+            cache: None,
         });
 
         let cm = build_config_map_for_test(&node, None, false);

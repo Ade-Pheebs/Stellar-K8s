@@ -208,6 +208,33 @@ spec:
                 autoscaling:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
+                    cache:
+                      type: object
+                      description: Bounded fail-open cache for read-only Soroban RPC state requests
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: false
+                        ttlSecs:
+                          type: integer
+                          format: int64
+                          minimum: 1
+                          default: 30
+                        maxEntries:
+                          type: integer
+                          format: int64
+                          minimum: 1
+                          maximum: 10000
+                          default: 10000
+                        maxBytes:
+                          type: integer
+                          format: int64
+                          minimum: 1
+                          maximum: 67108864
+                          default: 67108864
+                        image:
+                          type: string
+                          nullable: true
                 serviceConfig:
                   type: object
                   properties:

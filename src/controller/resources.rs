@@ -470,6 +470,20 @@ pub(crate) fn build_config_map(
                         data.insert("captive-core.cfg".to_string(), captive_config.clone());
                     }
                 }
+
+                if let Some(cache) = &config.cache {
+                    if cache.enabled {
+                        let cache_config = stellar_wasm_cache::CacheConfig {
+                            ttl_secs: cache.ttl_secs,
+                            max_entries: cache.max_entries,
+                            max_bytes: cache.max_bytes,
+                        };
+                        let json = serde_json::to_string(&cache_config)
+                            .map(|config| format!("{{\"cache\":{config}}}"))
+                            .unwrap_or_else(|_| "{\"cache\":{}}".to_string());
+                        data.insert("soroban-cache.json".to_string(), json);
+                    }
+                }
             }
         }
     }
@@ -966,11 +980,21 @@ fn build_service(node: &StellarNode, enable_mtls: bool) -> Service {
             port: 8000,
             ..Default::default()
         }],
-        NodeType::SorobanRpc => vec![ServicePort {
-            name: Some(http_port_name),
-            port: 8000,
-            ..Default::default()
-        }],
+        NodeType::SorobanRpc => {
+            let target_port = node
+                .spec
+                .soroban_config
+                .as_ref()
+                .and_then(|config| config.cache.as_ref())
+                .filter(|cache| cache.enabled)
+                .map(|_| IntOrString::Int(18000));
+            vec![ServicePort {
+                name: Some(http_port_name),
+                port: 8000,
+                target_port,
+                ..Default::default()
+            }]
+        },
     };
 
     Service {
@@ -1721,6 +1745,20 @@ fn build_pod_template(
             if fs.enable_share_process_namespace {
                 pod_spec.share_process_namespace = Some(true);
             }
+        }
+    }
+
+    // The proxy shares the pod network namespace and forwards to the unchanged
+    // Soroban RPC container on localhost:8000.
+    if node.spec.node_type == NodeType::SorobanRpc {
+        if let Some(cache) = node
+            .spec
+            .soroban_config
+            .as_ref()
+            .and_then(|config| config.cache.as_ref())
+            .filter(|cache| cache.enabled)
+        {
+            pod_spec.containers.push(build_cache_proxy_container(cache));
         }
     }
 
@@ -2896,6 +2934,96 @@ fn build_container(node: &StellarNode, enable_mtls: bool) -> Container {
     }
 }
 
+fn build_cache_proxy_container(cache: &crate::crd::SorobanCacheConfig) -> Container {
+    let mut requests = BTreeMap::new();
+    requests.insert("cpu".to_string(), Quantity("25m".to_string()));
+    requests.insert("memory".to_string(), Quantity("64Mi".to_string()));
+    let mut limits = BTreeMap::new();
+    limits.insert("cpu".to_string(), Quantity("250m".to_string()));
+    limits.insert("memory".to_string(), Quantity("256Mi".to_string()));
+
+    Container {
+        name: "soroban-cache".to_string(),
+        image: Some(cache.image.clone().unwrap_or_else(|| {
+            format!("ghcr.io/stellar/stellar-k8s:{}", env!("CARGO_PKG_VERSION"))
+        })),
+        command: Some(vec!["/soroban-cache-proxy".to_string()]),
+        env: Some(vec![
+            EnvVar {
+                name: "SOROBAN_CACHE_LISTEN".to_string(),
+                value: Some("0.0.0.0:18000".to_string()),
+                ..Default::default()
+            },
+            EnvVar {
+                name: "SOROBAN_CACHE_UPSTREAM".to_string(),
+                value: Some("http://127.0.0.1:8000".to_string()),
+                ..Default::default()
+            },
+            EnvVar {
+                name: "SOROBAN_CACHE_CONFIG".to_string(),
+                value: Some("/config/soroban-cache.json".to_string()),
+                ..Default::default()
+            },
+        ]),
+        ports: Some(vec![ContainerPort {
+            name: Some("cache-http".to_string()),
+            container_port: 18000,
+            protocol: Some("TCP".to_string()),
+            ..Default::default()
+        }]),
+        volume_mounts: Some(vec![VolumeMount {
+            name: "config".to_string(),
+            mount_path: "/config".to_string(),
+            read_only: Some(true),
+            ..Default::default()
+        }]),
+        liveness_probe: Some(k8s_openapi::api::core::v1::Probe {
+            http_get: Some(k8s_openapi::api::core::v1::HTTPGetAction {
+                path: Some("/healthz".to_string()),
+                port: IntOrString::Int(18000),
+                ..Default::default()
+            }),
+            initial_delay_seconds: Some(5),
+            period_seconds: Some(10),
+            timeout_seconds: Some(2),
+            failure_threshold: Some(3),
+            ..Default::default()
+        }),
+        readiness_probe: Some(k8s_openapi::api::core::v1::Probe {
+            http_get: Some(k8s_openapi::api::core::v1::HTTPGetAction {
+                path: Some("/readyz".to_string()),
+                port: IntOrString::Int(18000),
+                ..Default::default()
+            }),
+            initial_delay_seconds: Some(2),
+            period_seconds: Some(5),
+            timeout_seconds: Some(2),
+            failure_threshold: Some(3),
+            ..Default::default()
+        }),
+        resources: Some(K8sResources {
+            requests: Some(requests),
+            limits: Some(limits),
+            ..Default::default()
+        }),
+        security_context: Some(SecurityContext {
+            allow_privilege_escalation: Some(false),
+            read_only_root_filesystem: Some(true),
+            run_as_non_root: Some(true),
+            capabilities: Some(Capabilities {
+                drop: Some(vec!["ALL".to_string()]),
+                add: None,
+            }),
+            seccomp_profile: Some(SeccompProfile {
+                type_: "RuntimeDefault".to_string(),
+                localhost_profile: None,
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
 /// Build the migration container for Horizon
 fn build_horizon_migration_container(node: &StellarNode) -> Container {
     let mut container = build_container(node, false);
@@ -4014,6 +4142,11 @@ pub(crate) fn build_statefulset_for_test(
 #[cfg(test)]
 pub(crate) fn build_service_for_test(node: &StellarNode) -> k8s_openapi::api::core::v1::Service {
     build_service(node, false)
+}
+
+#[cfg(test)]
+pub(crate) fn build_pod_template_for_test(node: &StellarNode) -> PodTemplateSpec {
+    build_pod_template(node, &standard_labels(node), false, None)
 }
 
 #[cfg(test)]

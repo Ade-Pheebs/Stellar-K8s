@@ -1351,6 +1351,7 @@ mod stellar_node_spec_validation {
             }),
             enable_preflight: true,
             max_events_per_request: 10000,
+            cache: None,
         };
 
         // Test JSON serialization
