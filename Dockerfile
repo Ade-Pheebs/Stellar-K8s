@@ -58,19 +58,22 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
       --bin kubectl-stellar \
       --bin stellar-sidecar \
       --bin stellar-watcher \
-      --bin stellar-fork-detector && \
+      --bin stellar-fork-detector \
+      --bin soroban-cache-proxy && \
     cp target/aarch64-unknown-linux-gnu/release/stellar-operator target/release/ && \
     cp target/aarch64-unknown-linux-gnu/release/kubectl-stellar target/release/ && \
     cp target/aarch64-unknown-linux-gnu/release/stellar-sidecar target/release/ && \
     cp target/aarch64-unknown-linux-gnu/release/stellar-watcher target/release/ && \
-    cp target/aarch64-unknown-linux-gnu/release/stellar-fork-detector target/release/; \
+    cp target/aarch64-unknown-linux-gnu/release/stellar-fork-detector target/release/ && \
+    cp target/aarch64-unknown-linux-gnu/release/soroban-cache-proxy target/release/; \
   else \
     cargo build --release \
       --bin stellar-operator \
       --bin kubectl-stellar \
       --bin stellar-sidecar \
       --bin stellar-watcher \
-      --bin stellar-fork-detector; \
+      --bin stellar-fork-detector \
+      --bin soroban-cache-proxy; \
   fi
 
 # Strip binaries to reduce image size
@@ -78,7 +81,8 @@ RUN strip /app/target/release/stellar-operator \
     && strip /app/target/release/kubectl-stellar \
     && strip /app/target/release/stellar-sidecar \
     && strip /app/target/release/stellar-watcher \
-    && strip /app/target/release/stellar-fork-detector
+    && strip /app/target/release/stellar-fork-detector \
+    && strip /app/target/release/soroban-cache-proxy
 
 # ==============================================================================
 # Stage 4: Local Binaries - Fast local packaging from host build artifacts
@@ -86,6 +90,7 @@ RUN strip /app/target/release/stellar-operator \
 FROM scratch AS local-binaries
 COPY target/release/stellar-operator /stellar-operator
 COPY target/release/kubectl-stellar /kubectl-stellar
+COPY target/release/soroban-cache-proxy /soroban-cache-proxy
 
 # ==============================================================================
 # Stage 5: Runtime Local - Minimal image for local dev (no container recompile)
@@ -100,6 +105,7 @@ LABEL org.opencontainers.image.licenses="Apache-2.0"
 # Copy prebuilt local binaries
 COPY --from=local-binaries /stellar-operator /stellar-operator
 COPY --from=local-binaries /kubectl-stellar /kubectl-stellar
+COPY --from=local-binaries /soroban-cache-proxy /soroban-cache-proxy
 
 # Run as non-root user (UID 65532 is the nonroot user in distroless)
 USER nonroot:nonroot
@@ -129,6 +135,7 @@ COPY --from=builder /app/target/release/kubectl-stellar /kubectl-stellar
 COPY --from=builder /app/target/release/stellar-sidecar /stellar-sidecar
 COPY --from=builder /app/target/release/stellar-watcher /stellar-watcher
 COPY --from=builder /app/target/release/stellar-fork-detector /stellar-fork-detector
+COPY --from=builder /app/target/release/soroban-cache-proxy /soroban-cache-proxy
 
 # Run as non-root user (UID 65532 is the nonroot user in distroless)
 USER nonroot:nonroot

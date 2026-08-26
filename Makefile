@@ -1,4 +1,4 @@
-.PHONY: help build test fmt fmt-check lint clean docker-build install-crd apply-samples dev-setup ci-local benchmark benchmark-upgrade benchmark-webhook benchmark-webhook-health benchmark-webhook-compare benchmark-webhook-save benchmark-all run-dev helm-lint crd-gen run-local compose-up compose-dev compose-down compose-logs quickstart
+.PHONY: help build test fmt fmt-check lint clean docker-build install-crd apply-samples dev-setup ci-local benchmark benchmark-upgrade benchmark-webhook benchmark-webhook-health benchmark-webhook-compare benchmark-webhook-save benchmark-all benchmark-soroban-cache wasm-cache-build run-dev helm-lint crd-gen run-local compose-up compose-dev compose-down compose-logs quickstart
 
 # Default target
 .DEFAULT_GOAL := help
@@ -51,9 +51,17 @@ build: ## Build release
 	@echo "→ Building release..."
 	@$(CARGO) build --release --locked
 
+wasm-cache-build: ## Build the bounded Soroban cache Wasm artifact and enforce its size limit
+	@echo "→ Building Soroban cache Wasm artifact..."
+	@$(CARGO) build --release --locked --target wasm32-unknown-unknown -p stellar-wasm-cache
+	@test "$$(wc -c < target/wasm32-unknown-unknown/release/stellar_wasm_cache.wasm)" -lt 2097152
+
+benchmark-soroban-cache: ## Run the 10k-read Soroban cache benchmark against a running proxy
+	@node benchmarks/soroban-cache-load-test.js $(CACHE_PROXY_URL)
+
 docker-build: ## Fast local Docker build using host release binaries
 	@echo "→ Building Docker image (fast local mode)..."
-	@if [ ! -f target/release/stellar-operator ] || [ ! -f target/release/kubectl-stellar ]; then \
+	@if [ ! -f target/release/stellar-operator ] || [ ! -f target/release/kubectl-stellar ] || [ ! -f target/release/soroban-cache-proxy ]; then \
 		echo "→ Release binaries not found, building once..."; \
 		$(MAKE) build; \
 	fi

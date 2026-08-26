@@ -5561,6 +5561,7 @@ dependencies = [
  "serde_yaml",
  "sha2 0.10.9",
  "sqlx",
+ "stellar-wasm-cache",
  "tempfile",
  "thiserror 1.0.69",
  "time",
@@ -5583,6 +5584,16 @@ dependencies = [
  "wiremock",
  "x509-parser",
  "zip",
+]
+
+[[package]]
+name = "stellar-wasm-cache"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "proptest",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

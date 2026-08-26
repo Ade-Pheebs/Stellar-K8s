@@ -1274,6 +1274,34 @@ spec:
                     format: uint32
                     minimum: 0.0
                     type: integer
+                  cache:
+                    description: Bounded fail-open cache for read-only Soroban RPC state requests
+                    nullable: true
+                    properties:
+                      enabled:
+                        default: false
+                        type: boolean
+                      ttlSecs:
+                        default: 30
+                        format: int64
+                        minimum: 1.0
+                        type: integer
+                      maxEntries:
+                        default: 10000
+                        format: int64
+                        maximum: 10000.0
+                        minimum: 1.0
+                        type: integer
+                      maxBytes:
+                        default: 67108864
+                        format: int64
+                        maximum: 67108864.0
+                        minimum: 1.0
+                        type: integer
+                      image:
+                        nullable: true
+                        type: string
+                    type: object
                   stellarCoreUrl:
                     type: string
                 required:
