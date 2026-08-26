@@ -726,6 +726,89 @@ peer-2 = "G..."
         );
     }
     #[test]
+    fn test_enabled_soroban_cache_generates_config_and_proxy_route() {
+        use crate::crd::types::{SorobanCacheConfig, SorobanConfig};
+        use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
+
+        let mut node = make_node(NodeType::SorobanRpc);
+        node.spec.soroban_config = Some(SorobanConfig {
+            stellar_core_url: "http://core:11626".to_string(),
+            #[allow(deprecated)]
+            captive_core_config: None,
+            captive_core_structured_config: None,
+            enable_preflight: true,
+            max_events_per_request: 10000,
+            cache: Some(SorobanCacheConfig {
+                enabled: true,
+                ttl_secs: 45,
+                max_entries: 500,
+                max_bytes: 1024 * 1024,
+                image: None,
+            }),
+        });
+
+        let config_map = build_config_map_for_test(&node);
+        let cache_json = config_map
+            .data
+            .as_ref()
+            .and_then(|data| data.get("soroban-cache.json"))
+            .expect("enabled cache must be written to the node ConfigMap");
+        assert!(cache_json.contains("\"ttlSecs\":45"));
+        assert!(cache_json.contains("\"maxEntries\":500"));
+
+        let deployment = build_deployment_for_test(&node);
+        let pod = deployment.spec.unwrap().template.spec.unwrap();
+        let proxy = pod
+            .containers
+            .iter()
+            .find(|container| container.name == "soroban-cache")
+            .expect("enabled cache must inject the proxy container");
+        assert_eq!(proxy.ports.as_ref().unwrap()[0].container_port, 18000);
+        assert!(proxy
+            .volume_mounts
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|mount| mount.name == "config"));
+
+        let service = build_service_for_test(&node);
+        let port = &service.spec.unwrap().ports.unwrap()[0];
+        assert_eq!(port.port, 8000);
+        assert_eq!(port.target_port, Some(IntOrString::Int(18000)));
+    }
+
+    #[test]
+    fn test_disabled_soroban_cache_keeps_direct_service_route() {
+        use crate::crd::types::{SorobanCacheConfig, SorobanConfig};
+
+        let mut node = make_node(NodeType::SorobanRpc);
+        node.spec.soroban_config = Some(SorobanConfig {
+            stellar_core_url: "http://core:11626".to_string(),
+            #[allow(deprecated)]
+            captive_core_config: None,
+            captive_core_structured_config: None,
+            enable_preflight: true,
+            max_events_per_request: 10000,
+            cache: Some(SorobanCacheConfig {
+                enabled: false,
+                ..Default::default()
+            }),
+        });
+
+        let service = build_service_for_test(&node);
+        let port = &service.spec.unwrap().ports.unwrap()[0];
+        assert_eq!(port.port, 8000);
+        assert_eq!(port.target_port, None);
+
+        let config_map = build_config_map_for_test(&node);
+        assert!(config_map
+            .data
+            .as_ref()
+            .and_then(|data| data.get("soroban-cache.json"))
+            .is_none());
+    }
+
+    #[test]
     fn test_network_policy_stellar_native_egress() {
         let mut node = make_node(NodeType::Validator);
         let vc = ValidatorConfig {

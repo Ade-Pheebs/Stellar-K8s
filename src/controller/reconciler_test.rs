@@ -291,6 +291,7 @@ VALIDATORS=["VALIDATOR1", "VALIDATOR2"]"#
                     }),
                     enable_preflight: true,
                     max_events_per_request: 10000,
+                    cache: None,
                 }),
                 replicas: 3,
                 min_available: None,

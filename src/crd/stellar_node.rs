@@ -724,6 +724,21 @@ impl StellarNodeSpec {
                         "Add a spec.sorobanConfig section with the required Soroban RPC settings when nodeType is SorobanRpc.",
                     ));
                 }
+                if let Some(cache) = self
+                    .soroban_config
+                    .as_ref()
+                    .and_then(|config| config.cache.as_ref())
+                {
+                    if cache.enabled {
+                        if let Err(message) = cache.validate() {
+                            errors.push(SpecValidationError::new(
+                                "spec.sorobanConfig.cache",
+                                message,
+                                "Set cache.ttlSecs, cache.maxEntries, and cache.maxBytes to positive values.",
+                            ));
+                        }
+                    }
+                }
                 if let Some(ref autoscaling) = self.autoscaling {
                     if autoscaling.min_replicas < 1 {
                         errors.push(SpecValidationError::new(

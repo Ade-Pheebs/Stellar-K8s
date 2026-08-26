@@ -905,6 +905,65 @@ pub struct CaptiveCoreConfig {
     pub additional_config: Option<String>,
 }
 
+/// Bounded cache configuration for read-only Soroban RPC state requests.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SorobanCacheConfig {
+    /// Enable the fail-open cache proxy sidecar.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Lifetime of a cached response in seconds.
+    #[serde(default = "default_cache_ttl_secs")]
+    pub ttl_secs: u64,
+    /// Maximum number of cached responses.
+    #[serde(default = "default_cache_max_entries")]
+    #[schemars(range(min = 1, max = 10000))]
+    pub max_entries: usize,
+    /// Maximum aggregate response bytes held by the cache.
+    #[serde(default = "default_cache_max_bytes")]
+    #[schemars(range(min = 1, max = 67108864))]
+    pub max_bytes: usize,
+    /// Optional image containing the `soroban-cache-proxy` binary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+}
+
+fn default_cache_ttl_secs() -> u64 {
+    stellar_wasm_cache::DEFAULT_TTL_SECS
+}
+
+fn default_cache_max_entries() -> usize {
+    stellar_wasm_cache::DEFAULT_MAX_ENTRIES
+}
+
+fn default_cache_max_bytes() -> usize {
+    stellar_wasm_cache::DEFAULT_MAX_BYTES
+}
+
+impl Default for SorobanCacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            ttl_secs: default_cache_ttl_secs(),
+            max_entries: default_cache_max_entries(),
+            max_bytes: default_cache_max_bytes(),
+            image: None,
+        }
+    }
+}
+
+impl SorobanCacheConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        stellar_wasm_cache::CacheConfig {
+            ttl_secs: self.ttl_secs,
+            max_entries: self.max_entries,
+            max_bytes: self.max_bytes,
+        }
+        .validate()
+        .map_err(|error| format!("invalid Soroban cache configuration: {error:?}"))
+    }
+}
+
 /// Soroban RPC server configuration
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -922,6 +981,9 @@ pub struct SorobanConfig {
     pub enable_preflight: bool,
     #[serde(default = "default_max_events")]
     pub max_events_per_request: u32,
+    /// Optional bounded fail-open cache for read-only state RPC methods.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache: Option<SorobanCacheConfig>,
 }
 
 /// External database configuration for managed Postgres databases
