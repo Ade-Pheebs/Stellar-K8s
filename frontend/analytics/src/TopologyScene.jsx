@@ -22,7 +22,7 @@ function makeNodeMaterial() {
   return new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.96 });
 }
 
-export default function TopologyScene({ graph, onSelect, paused = false }) {
+export default function TopologyScene({ graph, onSelect, selectedId = null, paused = false }) {
   const mountRef = useRef(null);
   const graphRef = useRef(graph);
   const pausedRef = useRef(paused);
@@ -32,6 +32,9 @@ export default function TopologyScene({ graph, onSelect, paused = false }) {
   useEffect(() => { graphRef.current = graph; }, [graph]);
   useEffect(() => { pausedRef.current = paused; }, [paused]);
   useEffect(() => { onSelectRef.current = onSelect; }, [onSelect]);
+  useEffect(() => {
+    if (sceneState.current) sceneState.current.selected = selectedId;
+  }, [selectedId]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -62,8 +65,10 @@ export default function TopologyScene({ graph, onSelect, paused = false }) {
       nodes: new THREE.InstancedMesh(new THREE.SphereGeometry(NODE_RADIUS, 8, 6), makeNodeMaterial(), 1),
       edges: new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x56677b, transparent: true, opacity: 0.38 })),
       edgeCapacity: 20000,
+      nodeCapacity: 1,
       positions: new Map(),
       velocities: new Map(),
+      forces: new Map(),
       selected: null,
       raycaster: new THREE.Raycaster(),
       pointer: new THREE.Vector2(),
@@ -71,6 +76,8 @@ export default function TopologyScene({ graph, onSelect, paused = false }) {
       lastSimulation: 0,
     };
     state.nodes.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    state.nodes.frustumCulled = false;
+    state.edges.frustumCulled = false;
     scene.add(state.nodes, state.edges);
     sceneState.current = state;
 
@@ -138,12 +145,14 @@ export default function TopologyScene({ graph, onSelect, paused = false }) {
       if (!ids.has(id)) {
         state.positions.delete(id);
         state.velocities.delete(id);
+        state.forces.delete(id);
       }
     }
     graph.nodes.forEach((node, index) => {
       if (!state.positions.has(node.id)) {
         state.positions.set(node.id, hashPosition(node.id, index));
         state.velocities.set(node.id, new THREE.Vector3());
+        state.forces.set(node.id, new THREE.Vector3());
       }
     });
   }, [graph.nodes]);
@@ -155,21 +164,33 @@ function simulate(graph, state, time) {
   const nodes = graph.nodes;
   const positions = state.positions;
   const velocities = state.velocities;
-  const edgeForce = new Map(nodes.map((node) => [node.id, new THREE.Vector3()]));
-  const degree = new Map(nodes.map((node) => [node.id, 0]));
-  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const forces = state.forces;
+  for (const node of nodes) {
+    const force = forces.get(node.id);
+    if (force) force.set(0, 0, 0);
+  }
+
 
   for (const edge of graph.edges) {
     const source = positions.get(edge.source);
     const target = positions.get(edge.target);
     if (!source || !target) continue;
-    const delta = target.clone().sub(source);
-    const distance = Math.max(delta.length(), 0.05);
-    const force = delta.multiplyScalar((distance - 1.15) * 0.003 / distance);
-    edgeForce.get(edge.source)?.add(force);
-    edgeForce.get(edge.target)?.sub(force);
-    degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1);
-    degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1);
+    const dx = target.x - source.x;
+    const dy = target.y - source.y;
+    const dz = target.z - source.z;
+    const distance = Math.max(Math.sqrt(dx * dx + dy * dy + dz * dz), 0.05);
+    const scale = (distance - 1.15) * 0.003 / distance;
+    const sourceForce = forces.get(edge.source);
+    const targetForce = forces.get(edge.target);
+    if (sourceForce && targetForce) {
+      sourceForce.x += dx * scale;
+      sourceForce.y += dy * scale;
+      sourceForce.z += dz * scale;
+      targetForce.x -= dx * scale;
+      targetForce.y -= dy * scale;
+      targetForce.z -= dz * scale;
+    }
+
   }
 
   // Sampled repulsion keeps simulation work bounded as node count grows.
@@ -177,30 +198,37 @@ function simulate(graph, state, time) {
   for (let i = 0; i < nodes.length; i += 1) {
     const node = nodes[i];
     const position = positions.get(node.id);
-    const force = edgeForce.get(node.id);
+    const force = forces.get(node.id);
     if (!position || !force) continue;
     for (let j = (i + 1) % sampleStride; j < nodes.length; j += sampleStride) {
       if (i === j) continue;
       const other = positions.get(nodes[j].id);
-      const delta = position.clone().sub(other);
-      const distanceSquared = Math.max(delta.lengthSq(), 0.08);
-      force.add(delta.multiplyScalar(0.0008 / distanceSquared));
+      if (!other) continue;
+      const dx = position.x - other.x;
+      const dy = position.y - other.y;
+      const dz = position.z - other.z;
+      const distanceSquared = Math.max(dx * dx + dy * dy + dz * dz, 0.08);
+      const scale = 0.0008 / distanceSquared;
+      force.x += dx * scale;
+      force.y += dy * scale;
+      force.z += dz * scale;
     }
-    force.add(position.clone().multiplyScalar(-0.0007));
+    force.x -= position.x * 0.0007;
+    force.y -= position.y * 0.0007;
+    force.z -= position.z * 0.0007;
     const velocity = velocities.get(node.id);
-    velocity.add(force).multiplyScalar(0.91);
+    if (!velocity) continue;
+    velocity.x = (velocity.x + force.x) * 0.91;
+    velocity.y = (velocity.y + force.y) * 0.91;
+    velocity.z = (velocity.z + force.z) * 0.91;
     position.add(velocity);
     position.y += Math.sin(time * 0.0005 + i) * 0.0005;
-  }
-  // Keep isolated nodes visible without moving the graph center.
-  for (const node of nodes) {
-    if ((degree.get(node.id) ?? 0) === 0) byId.get(node.id) && positions.get(node.id).multiplyScalar(0.995);
   }
 }
 
 function updateInstances(graph, state, temp, color) {
   const count = Math.max(graph.nodes.length, 1);
-  if (state.nodes.count !== count) {
+  if (state.nodeCapacity !== count) {
     const old = state.nodes;
     const replacement = new THREE.InstancedMesh(new THREE.SphereGeometry(NODE_RADIUS, 8, 6), makeNodeMaterial(), count);
     replacement.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -209,6 +237,7 @@ function updateInstances(graph, state, temp, color) {
     old.geometry.dispose();
     old.material.dispose();
     state.nodes = replacement;
+    state.nodeCapacity = count;
     state.scene.add(replacement);
   }
   state.nodes.count = graph.nodes.length;
@@ -236,10 +265,6 @@ function updateInstances(graph, state, temp, color) {
     positionAttribute.setXYZ(index * 2, source.x, source.y, source.z);
     positionAttribute.setXYZ(index * 2 + 1, target.x, target.y, target.z);
   });
-  for (let index = graph.edges.length * 2; index < state.edgeCapacity * 2; index += 1) {
-    positionAttribute.setXYZ(index, 0, 0, 0);
-  }
   positionAttribute.needsUpdate = true;
   state.edges.geometry.setDrawRange(0, graph.edges.length * 2);
-  state.edges.geometry.computeBoundingSphere();
 }

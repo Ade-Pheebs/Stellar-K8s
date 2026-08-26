@@ -17,7 +17,7 @@ Open the Vite URL printed by the command. The default source is the operator Web
 /api/v1/quorum/topology/stream
 ```
 
-The operator stream sends `QuorumTopologyResponse` snapshots every five seconds. The frontend also accepts individual JSON `ScpMessage` records, so it can be connected to a Kafka bridge or another WebSocket consumer.
+The operator stream sends `QuorumTopologyResponse` snapshots every five seconds. The frontend also accepts individual JSON `ScpMessage` records. For a real Kafka topic, run `npm run stream:kafka`; the KafkaJS bridge consumes `KAFKA_TOPIC` from `KAFKA_BROKERS` and broadcasts JSON messages to browser clients over WebSocket.
 
 ## Mock Load Test
 
@@ -33,11 +33,19 @@ Choose **Mock Kafka stream** in the app, or open the app with `?source=mock`. Cu
 node scripts/mock-kafka-stream.mjs --serve --nodes 500 --edges 2000 --interval 120
 ```
 
+For a real topic bridge:
+
+```bash
+KAFKA_BROKERS=localhost:9092 KAFKA_TOPIC=stellar-scp-messages npm run stream:kafka
+```
+
+Set `KAFKA_FROM_BEGINNING=true` to replay retained messages. The bridge expects JSON values, matching the existing JSON serialization path in the operator pipeline.
+
 The generator sends one initial snapshot and then individual SCP messages containing phase, ballot, TPS, ledger time, and quorum-set updates. Without `--serve`, it writes newline-delimited JSON records to stdout for replay or piping into a Kafka producer.
 
 ## Data Mapping
 
-Snapshot nodes use the existing operator fields: `id`, `full_id`, `phase`, `is_critical`, `threshold`, and `stalled`. Individual messages use the fields in `schemas/scp_message.proto`. TPS and ledger time are read from `metrics.tps`, `metrics.ledger_time_ms`, or equivalent snake/camel-case fields and metadata.
+Snapshot nodes use the existing operator fields: `id`, `full_id`, `phase`, `is_critical`, `threshold`, and `stalled`. Individual messages use the fields in `schemas/scp_message.proto`. TPS and ledger time are read from `metrics.tps`, `metrics.ledger_time_ms`, or equivalent snake/camel-case fields and metadata. The current repository SCP schemas do not define those two measurements, so live producers must enrich the message or metadata for the inspector to show them; the mock stream includes both.
 
 Node colors indicate health: green is synced, amber is degraded, and red is falling behind or unknown. Click a node to inspect cluster, SCP phase, ballot, TPS, ledger time, and quorum threshold. OrbitControls provides drag-to-orbit, scroll-to-zoom, and pan interaction.
 

@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test src/graphModel.test.js",
-    "mock:stream": "node scripts/mock-kafka-stream.mjs --serve"
+    "mock:stream": "node scripts/mock-kafka-stream.mjs --serve",
+    "stream:kafka": "node scripts/kafka-websocket-bridge.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
@@ -16,7 +17,8 @@
     "vite": "^6.0.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "kafkajs": "^2.2.4"
   },
   "devDependencies": {}
 }

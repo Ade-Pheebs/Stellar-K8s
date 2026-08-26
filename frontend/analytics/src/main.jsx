@@ -1,40 +1,56 @@
-import { StrictMode, useCallback, useEffect, useMemo, useState } from 'react';
+import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import TopologyScene from './TopologyScene.jsx';
 import { createStreamState, ingest, materialize, statusForNode } from './graphModel.js';
 import './styles.css';
 
 const EMPTY_GRAPH = materialize(createStreamState());
-const sourceFromQuery = new URLSearchParams(window.location.search).get('source');
+const query = new URLSearchParams(window.location.search);
+const sourceFromQuery = query.get('source');
+const bridgeUrl = query.get('ws') || 'localhost:8787';
+const initialSource = sourceFromQuery === 'mock' || sourceFromQuery === 'kafka' ? sourceFromQuery : 'live';
 
 function streamUrl(source) {
-  if (source === 'mock') return 'ws://localhost:8787';
-  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws:';
-  return `${protocol}//${window.location.host}/api/v1/quorum/topology/stream`;
+  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  if (source === 'mock' || source === 'kafka') return `${protocol}://${bridgeUrl}`;
+  return `${protocol}://${window.location.host}/api/v1/quorum/topology/stream`;
 }
 
 function App() {
-  const [source, setSource] = useState(sourceFromQuery === 'mock' ? 'mock' : 'live');
+  const [source, setSource] = useState(initialSource);
   const [graph, setGraph] = useState(EMPTY_GRAPH);
   const [connection, setConnection] = useState('connecting');
   const [selected, setSelected] = useState(null);
   const [paused, setPaused] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
+  const streamStateRef = useRef(createStreamState());
+  const renderFrameRef = useRef(null);
 
   useEffect(() => {
+    streamStateRef.current = createStreamState();
     setGraph(EMPTY_GRAPH);
     setSelected(null);
     setConnection('connecting');
     let socket;
     let disposed = false;
+    const publishGraph = () => {
+      if (renderFrameRef.current !== null) return;
+      renderFrameRef.current = requestAnimationFrame(() => {
+        renderFrameRef.current = null;
+        if (disposed) return;
+        setGraph(materialize(streamStateRef.current));
+        setLastUpdate(new Date());
+      });
+    };
     try {
       socket = new WebSocket(streamUrl(source));
       socket.onopen = () => setConnection('live');
       socket.onmessage = (event) => {
+        if (disposed) return;
         try {
           const payload = JSON.parse(event.data);
-          setGraph((current) => materialize(ingest(createStreamState(current), payload)));
-          setLastUpdate(new Date());
+          streamStateRef.current = ingest(streamStateRef.current, payload);
+          publishGraph();
         } catch {
           setConnection('error');
         }
@@ -47,6 +63,10 @@ function App() {
     return () => {
       disposed = true;
       socket?.close();
+      if (renderFrameRef.current !== null) {
+        cancelAnimationFrame(renderFrameRef.current);
+        renderFrameRef.current = null;
+      }
     };
   }, [source]);
 
@@ -60,7 +80,7 @@ function App() {
   }, [graph.nodes]);
 
   const selectNode = useCallback((node) => setSelected(node), []);
-  const sourceLabel = source === 'mock' ? 'Mock Kafka stream' : 'Operator WebSocket';
+  const sourceLabel = source === 'mock' ? 'Mock Kafka stream' : source === 'kafka' ? 'Kafka WebSocket bridge' : 'Operator WebSocket';
 
   return (
     <main className="app-shell">
@@ -68,13 +88,14 @@ function App() {
         <div className="brand-block">
           <span className="eyebrow">STELLAR / OBSERVABILITY</span>
           <h1>Network topology</h1>
-          <p>Multi-cluster quorum health in three dimensions.</p>
+          <p>Multi-cluster quorum health.</p>
         </div>
         <div className="toolbar" role="toolbar" aria-label="Topology controls">
           <label className="select-wrap">
             <span>Data source</span>
             <select value={source} onChange={(event) => setSource(event.target.value)}>
               <option value="live">Live operator stream</option>
+              <option value="kafka">Kafka WebSocket bridge</option>
               <option value="mock">Mock Kafka stream</option>
             </select>
           </label>
@@ -99,9 +120,9 @@ function App() {
               <strong>{sourceLabel}</strong>
               <span className="muted">{lastUpdate ? `updated ${lastUpdate.toLocaleTimeString()}` : 'waiting for telemetry'}</span>
             </div>
-            <span className="muted">Drag to orbit · scroll to zoom · click a node</span>
+            <span className="muted">Live graph</span>
           </div>
-          <TopologyScene graph={graph} onSelect={selectNode} paused={paused} />
+          <TopologyScene graph={graph} onSelect={selectNode} selectedId={selected?.id} paused={paused} />
           <div className="legend" aria-label="Node health legend">
             <Legend color="green" label="Synced" />
             <Legend color="amber" label="Degraded" />
@@ -127,7 +148,7 @@ function Legend({ color, label }) {
 }
 
 function EmptyInspector() {
-  return <div className="empty-inspector"><div className="empty-icon">+</div><h2>Select a validator</h2><p>Click a node to inspect live throughput, ledger timing, and quorum participation.</p></div>;
+  return <div className="empty-inspector"><div className="empty-icon">+</div><h2>Select a validator</h2><p>Validator metrics will appear here.</p></div>;
 }
 
 function NodeInspector({ node }) {
