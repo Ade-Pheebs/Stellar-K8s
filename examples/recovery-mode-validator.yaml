@@ -73,7 +73,6 @@ spec:
     historyArchiveUrls:
       - "https://history.stellar.org/prd/core-testnet/core_testnet_001"
 
----
 # Expected behavior:
 #
 # 1. Workload keeps running normally (this does NOT suspend the node —
