@@ -1,6 +1,8 @@
 suite: pdb
 templates:
   - templates/pdb.yaml
+set:
+  podDisruptionBudget.enabled: true
 
 tests:
   - it: renders PDB with default values
@@ -125,9 +127,13 @@ tests:
     set:
       podDisruptionBudget.minAvailable: "1"
     asserts:
+      # A numeric string renders as an unquoted YAML scalar, so it comes
+      # back as an int here -- Kubernetes' IntOrString accepts either form
+      # identically. Only a non-numeric value like "50%" (below) needs to
+      # stay a string.
       - equal:
           path: spec.minAvailable
-          value: "1"
+          value: 1
 
   - it: works with maxUnavailable as percentage
     set:
