@@ -200,7 +200,6 @@ defaultResources:
     limits:
       cpu: "4"
       memory: "8Gi"
-      
 
 # Feature flags — toggle operator capabilities at runtime without restart.
 featureFlags:
